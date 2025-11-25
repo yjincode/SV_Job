@@ -1,0 +1,177 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// 원본 데이터 저장용 테이블 (PK 없음)
+// ============================================
+
+// player_history.csv 원본 (기술적 PK만 있음, 논리적 식별자 아님)
+model PlayerHistory {
+  id                  Int       @id @default(autoincrement())
+  campaignId          String    @map("campaign_id")
+  date                DateTime
+  action              String
+  campaignSessionId   String    @map("campaign_session_id")
+  contentId           String    @map("content_id")
+  contentSessionId    String    @map("content_session_id")
+  contentTitle        String    @map("content_title")
+  deviceId            String    @map("device_id")
+  durationSecond      Float     @map("duration_second")
+  inventoryId         String    @map("inventory_id")
+  isoLocalTime        DateTime  @map("iso_local_time")
+  isoTime             DateTime  @map("iso_time")
+  playerVersion       String    @map("player_version")
+  pricingRule         String    @map("pricing_rule")
+  contentDuration     Float     @map("content_duration")
+  contentSelection    String    @map("content_selection")
+  contentVersion      Int       @map("content_version")
+  elapsedSecond       Float     @map("elapsed_second")
+  playlistCreatedTime DateTime  @map("playlist_created_time")
+  sequenceId          String    @map("sequence_id")
+  advertiserId        String?   @map("advertiser_id")
+  isoTimeDate         DateTime  @map("iso_time_date")
+  partDate            DateTime  @map("part_date")
+
+  @@map("player_history")
+}
+
+// content_performance.csv 원본 (기술적 PK만 있음, 논리적 식별자 아님)
+model ContentPerformance {
+  id           Int      @id @default(autoincrement())
+  contentId    String   @map("content_id")
+  title        String
+  audienceId   String   @map("audience_id")
+  age          String
+  gender       String
+  playAt       DateTime @map("play_at")
+  attentionSec Float    @map("attention_sec")
+  isAttention  Boolean  @map("is_attention")
+  isEntrance   Boolean  @map("is_entrance")
+  contentGroup String   @map("content_group")
+
+  @@map("content_performance")
+}
+
+// ============================================
+// 정제된 데이터 테이블 (PK 있음)
+// ============================================
+
+// 정제된 player_history (campaign_session_id로 그룹핑)
+model RawPlayerHistory {
+  id                     Int       @id @default(autoincrement())
+  campaignSessionId      String    @unique @map("campaign_session_id")
+  campaignId             String    @map("campaign_id")
+  startAt                DateTime? @map("start_at")
+  endAt                  DateTime? @map("end_at")
+  durationSecond         Float?    @map("duration_second")
+  elapsedSecond          Float?    @map("elapsed_second")
+  contentId              String    @map("content_id")
+  contentSessionId       String    @map("content_session_id")
+  contentTitle           String    @map("content_title")
+  deviceId               String    @map("device_id")
+  inventoryId            String    @map("inventory_id")
+  playerVersion          String    @map("player_version")
+  pricingRule            String    @map("pricing_rule")
+  contentDuration        Float     @map("content_duration")
+  contentSelection       String    @map("content_selection")
+  contentVersion         Int       @map("content_version")
+  playlistCreatedTime    DateTime  @map("playlist_created_time")
+  sequenceId             String    @map("sequence_id")
+  advertiserId           String?   @map("advertiser_id")
+  contentPerformanceIds  Int[]     @default([]) @map("content_performance_ids")
+  createdAt              DateTime  @default(now()) @map("created_at")
+
+  @@index([campaignSessionId])
+  @@index([startAt])
+  @@index([contentId])
+  @@map("raw_player_history")
+}
+
+// 정제된 content_performance
+model RawContentPerformance {
+  id           Int      @id @default(autoincrement())
+  contentId    String   @map("content_id")
+  title        String
+  audienceId   String   @map("audience_id")
+  age          String
+  gender       String
+  playAt       DateTime @map("play_at")
+  attentionSec Float    @map("attention_sec")
+  isAttention  Boolean  @map("is_attention")
+  isEntrance   Boolean  @map("is_entrance")
+  contentGroup String   @map("content_group")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([playAt])
+  @@index([contentId])
+  @@index([audienceId])
+  @@map("raw_content_performance")
+}
+
+// ============================================
+// 정리된 데이터 테이블
+// ============================================
+
+// Content 마스터 (content_id별로 1개의 레코드)
+model Content {
+  id           Int               @id @default(autoincrement())
+  contentId    String            @unique @map("content_id")
+  title        String
+  contentGroup String            @map("content_group")
+  createdAt    DateTime          @default(now()) @map("created_at")
+
+  campaignSessions CampaignSession[]
+
+  @@map("content")
+}
+
+// Campaign Session (campaign_session_id별로 1개의 레코드)
+model CampaignSession {
+  id                 Int       @id @default(autoincrement())
+  campaignSessionId  String    @unique @map("campaign_session_id")
+  startTime          DateTime? @map("start_time")
+  endTime            DateTime? @map("end_time")
+  duration           Float?    @map("duration")
+  audienceId         String?   @map("audience_id")
+  contentId          String?   @map("content_id")
+  contentSessionId   String?   @map("content_session_id")
+  contentTitle       String?   @map("content_title")
+  deviceId           String?   @map("device_id")
+  contentFk          Int?      @map("content_fk")
+
+  content            Content?  @relation(fields: [contentFk], references: [id])
+
+  createdAt          DateTime  @default(now()) @map("created_at")
+
+  @@index([contentFk])
+  @@index([startTime])
+  @@index([audienceId])
+  @@map("campaign_session")
+}
+
+// ============================================
+// KPI 집계 테이블
+// ============================================
+
+// Pre-aggregated KPI summary for O(1) queries
+model PerformanceSummary {
+  id            Int      @id @default(autoincrement())
+  contentId     String   @unique @map("content_id")
+  title         String
+  contentGroup  String   @map("content_group")
+  impressions   Int
+  attentionRate Float    @map("attention_rate")
+  entranceRate  Float    @map("entrance_rate")
+  grade         String
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([contentGroup])
+  @@index([entranceRate])
+  @@map("performance_summary")
+}

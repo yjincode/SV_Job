@@ -1,0 +1,9 @@
+# Handle line endings automatically for files detected as text
+* text=auto
+
+# Force shell scripts to use LF (Unix-style)
+*.sh text eol=lf
+
+# Force these to use LF as well
+Dockerfile text eol=lf
+docker-compose.yml text eol=lf
