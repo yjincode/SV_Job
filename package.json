@@ -9,8 +9,8 @@
     "lint": "next lint",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
-    "db:seed": "tsx scripts/seed.ts",
-    "data:check": "tsx scripts/quality-check.ts"
+    "db:import": "tsx scripts/import-csv.ts",
+    "db:seed": "tsx scripts/seed.ts"
   },
   "dependencies": {
     "next": "14.2.15",

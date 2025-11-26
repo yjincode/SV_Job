@@ -22,7 +22,8 @@ export const translations = {
       impressions: 'Impressions',
       attentionRate: 'Attention Rate',
       entranceRate: 'Entrance Rate',
-      grade: 'Grade'
+      grade: 'Grade',
+      sortBy: 'Sort by'
     },
     scatter: {
       title: 'Attention-Entrance Correlation',
@@ -35,6 +36,26 @@ export const translations = {
       description: 'Comparing effectiveness across different ad groups',
       avgEntranceRate: 'Avg Entrance Rate',
       contentCount: 'Content Count'
+    },
+    modal: {
+      error: 'Error',
+      noData: 'Unable to load data',
+      close: 'Close',
+      totalViewers: 'Total Viewers',
+      totalImpressions: 'Total Impressions',
+      totalWatchTime: 'Total Watch Time',
+      minutes: 'min',
+      ageDistribution: 'Age Distribution',
+      genderDistribution: 'Gender Distribution',
+      viewerCount: 'Viewers',
+      gender: {
+        male: 'Male',
+        female: 'Female',
+        unknown: 'Unknown'
+      },
+      age: {
+        unknown: 'Unknown'
+      }
     }
   },
   ko: {
@@ -60,7 +81,8 @@ export const translations = {
       impressions: '노출 수',
       attentionRate: '주목률',
       entranceRate: '입장율',
-      grade: '등급'
+      grade: '등급',
+      sortBy: '정렬'
     },
     scatter: {
       title: '주목-입장 상관관계',
@@ -73,6 +95,26 @@ export const translations = {
       description: '그룹별 광고 효과성 비교',
       avgEntranceRate: '평균 입장율',
       contentCount: '콘텐츠 수'
+    },
+    modal: {
+      error: '오류 발생',
+      noData: '데이터를 불러올 수 없습니다',
+      close: '닫기',
+      totalViewers: '총 시청자',
+      totalImpressions: '총 노출수',
+      totalWatchTime: '총 시청 시간',
+      minutes: '분',
+      ageDistribution: '연령별 시청자 분포',
+      genderDistribution: '성별 시청자 분포',
+      viewerCount: '시청자 수',
+      gender: {
+        male: '남성',
+        female: '여성',
+        unknown: '알수없음'
+      },
+      age: {
+        unknown: '알수없음'
+      }
     }
   }
 }

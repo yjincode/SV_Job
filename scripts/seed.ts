@@ -1,571 +1,423 @@
 import { PrismaClient } from '@prisma/client'
-import { createReadStream } from 'fs'
-import { parse } from 'csv-parse'
-import path from 'path'
 
 const prisma = new PrismaClient({
-  log: ['error'], // 에러만 로깅
+  log: ['error'],
 })
-const BATCH_SIZE = 5000
-
-// 날짜 유효성 검사 헬퍼
-function isValidDate(dateString: string): boolean {
-  if (!dateString || dateString.trim() === '') return false
-  const date = new Date(dateString)
-  return !isNaN(date.getTime())
-}
 
 // ============================================
-// 타입 정의
+// Step 1: Campaign 테이블 생성
 // ============================================
 
-interface PlayerHistoryRow {
-  campaign_id: string
-  date: string
-  action: string
-  campaign_session_id: string
-  content_id: string
-  content_session_id: string
-  content_title: string
-  device_id: string
-  duration_second: string
-  inventory_id: string
-  iso_local_time: string
-  iso_time: string
-  player_version: string
-  pricing_rule: string
-  content_duration: string
-  content_selection: string
-  content_version: string
-  elapsed_second: string
-  playlist_created_time: string
-  sequence_id: string
-  advertiser_id: string
-  iso_time_date: string
-  part_date: string
-}
+async function buildCampaigns() {
+  console.log('[1/4] Building Campaign 테이블...')
 
-interface ContentPerformanceRow {
-  content_id: string
-  title: string
-  audience_id: string
-  age: string
-  gender: string
-  play_at: string
-  attention_sec: string
-  is_attention: string
-  is_entrance: string
-  content_group: string
-}
-
-// ============================================
-// Step 1: player_history.csv → PlayerHistory (원본)
-// ============================================
-
-async function seedPlayerHistory() {
-  console.log('\n[1/4] Seeding player_history (원본)...')
-
-  const csvPath = path.join(process.cwd(), '.csv', 'player_history.csv')
-  const records: PlayerHistoryRow[] = []
-  let totalRows = 0
-
-  const parser = createReadStream(csvPath).pipe(
-    parse({
-      columns: true,
-      skip_empty_lines: true,
-      trim: true,
-      bom: true,
-      relax_column_count: true,
-      relax_quotes: true,
-    })
-  )
-
-  for await (const row of parser) {
-    const record = row as PlayerHistoryRow
-    records.push(record)
-
-    if (records.length >= BATCH_SIZE) {
-      await insertPlayerHistoryBatch(records)
-      totalRows += records.length
-      console.log(`  삽입: ${totalRows} rows...`)
-      records.length = 0
-    }
-  }
-
-  if (records.length > 0) {
-    await insertPlayerHistoryBatch(records)
-    totalRows += records.length
-  }
-
-  console.log(`[OK] player_history: ${totalRows} rows`)
-  return { total: totalRows }
-}
-
-async function insertPlayerHistoryBatch(records: PlayerHistoryRow[]) {
-  // 날짜 검증 후 유효한 레코드만 필터링
-  const validRecords = records.filter(row =>
-    isValidDate(row.date) &&
-    isValidDate(row.iso_local_time) &&
-    isValidDate(row.iso_time) &&
-    isValidDate(row.playlist_created_time) &&
-    isValidDate(row.iso_time_date) &&
-    isValidDate(row.part_date)
-  )
-
-  if (validRecords.length < records.length) {
-    console.log(`  [경고] ${records.length - validRecords.length}개 레코드 스킵 (잘못된 날짜)`)
-  }
-
-  if (validRecords.length === 0) return
-
-  const data = validRecords.map((row) => ({
-    campaignId: row.campaign_id || '',
-    date: new Date(row.date),
-    action: row.action || '',
-    campaignSessionId: row.campaign_session_id || '',
-    contentId: row.content_id || '',
-    contentSessionId: row.content_session_id || '',
-    contentTitle: row.content_title || '',
-    deviceId: row.device_id || '',
-    durationSecond: parseFloat(row.duration_second) || 0,
-    inventoryId: row.inventory_id || '',
-    isoLocalTime: new Date(row.iso_local_time),
-    isoTime: new Date(row.iso_time),
-    playerVersion: row.player_version || '',
-    pricingRule: row.pricing_rule || '',
-    contentDuration: parseFloat(row.content_duration) || 0,
-    contentSelection: row.content_selection || '',
-    contentVersion: parseInt(row.content_version) || 0,
-    elapsedSecond: parseFloat(row.elapsed_second) || 0,
-    playlistCreatedTime: new Date(row.playlist_created_time),
-    sequenceId: row.sequence_id || '',
-    advertiserId: row.advertiser_id || null,
-    isoTimeDate: new Date(row.iso_time_date),
-    partDate: new Date(row.part_date),
-  }))
-
-  await prisma.playerHistory.createMany({
-    data,
-    skipDuplicates: true,
-  })
-}
-
-// ============================================
-// Step 2: content_performance.csv → ContentPerformance (원본)
-// ============================================
-
-async function seedContentPerformance() {
-  console.log('\n[2/4] Seeding content_performance (원본)...')
-
-  const csvPath = path.join(process.cwd(), '.csv', 'content_performance.csv')
-  const records: ContentPerformanceRow[] = []
-  let totalRows = 0
-
-  const parser = createReadStream(csvPath).pipe(
-    parse({
-      columns: true,
-      skip_empty_lines: true,
-      trim: true,
-      bom: true,
-      relax_column_count: true,
-      relax_quotes: true,
-    })
-  )
-
-  for await (const row of parser) {
-    const record = row as ContentPerformanceRow
-    records.push(record)
-
-    if (records.length >= BATCH_SIZE) {
-      await insertContentPerformanceBatch(records)
-      totalRows += records.length
-      console.log(`  삽입: ${totalRows} rows...`)
-      records.length = 0
-    }
-  }
-
-  if (records.length > 0) {
-    await insertContentPerformanceBatch(records)
-    totalRows += records.length
-  }
-
-  console.log(`[OK] content_performance: ${totalRows} rows`)
-  return { total: totalRows }
-}
-
-async function insertContentPerformanceBatch(records: ContentPerformanceRow[]) {
-  // 날짜 검증 후 유효한 레코드만 필터링
-  const validRecords = records.filter(row => isValidDate(row.play_at))
-
-  if (validRecords.length < records.length) {
-    console.log(`  [경고] ${records.length - validRecords.length}개 레코드 스킵 (잘못된 날짜)`)
-  }
-
-  if (validRecords.length === 0) return
-
-  const data = validRecords.map((row) => ({
-    contentId: row.content_id || '',
-    title: row.title || '',
-    audienceId: row.audience_id || '',
-    age: row.age || '',
-    gender: row.gender || '',
-    playAt: new Date(row.play_at),
-    attentionSec: parseFloat(row.attention_sec) || 0,
-    isAttention: row.is_attention === 'true',
-    isEntrance: row.is_entrance === 'true',
-    contentGroup: row.content_group || '',
-  }))
-
-  await prisma.contentPerformance.createMany({
-    data,
-    skipDuplicates: true,
-  })
-}
-
-// ============================================
-// Step 3: PlayerHistory → RawPlayerHistory (그룹핑)
-// ============================================
-
-async function buildRawPlayerHistory() {
-  console.log('\n[3/4] Building raw_player_history (그룹핑)...')
-
-  // campaign_session_id로 그룹핑하여 정제
-  const groupedSessions = await prisma.$queryRaw<Array<{
-    campaign_session_id: string
+  // Step 1-1: player_history에서 확장자 없는 content_title 우선 선택
+  const campaignsFromPlayerHistory = await prisma.$queryRaw<Array<{
     campaign_id: string
-    start_at: Date | null
-    end_at: Date | null
-    duration_second: number | null
-    elapsed_second: number | null
     content_id: string
-    content_session_id: string
     content_title: string
-    device_id: string
-    inventory_id: string
-    player_version: string
-    pricing_rule: string
-    content_duration: number
-    content_selection: string
-    content_version: number
-    playlist_created_time: Date
-    sequence_id: string
-    advertiser_id: string | null
   }>>`
-    SELECT
-      campaign_session_id,
-      MAX(campaign_id) as campaign_id,
-      MIN(CASE WHEN action = 'PLAY_START' THEN iso_time END) as start_at,
-      MAX(CASE WHEN action = 'PLAY_END' THEN iso_time END) as end_at,
-      MAX(CASE WHEN action = 'PLAY_END' THEN duration_second END) as duration_second,
-      MAX(CASE WHEN action = 'PLAY_END' THEN elapsed_second END) as elapsed_second,
-      MAX(content_id) as content_id,
-      MAX(content_session_id) as content_session_id,
-      MAX(content_title) as content_title,
-      MAX(device_id) as device_id,
-      MAX(inventory_id) as inventory_id,
-      MAX(player_version) as player_version,
-      MAX(pricing_rule) as pricing_rule,
-      MAX(content_duration) as content_duration,
-      MAX(content_selection) as content_selection,
-      MAX(content_version) as content_version,
-      MAX(playlist_created_time) as playlist_created_time,
-      MAX(sequence_id) as sequence_id,
-      MAX(advertiser_id) as advertiser_id
+    SELECT DISTINCT ON (campaign_id)
+      campaign_id,
+      content_id,
+      content_title
     FROM player_history
-    WHERE campaign_session_id IS NOT NULL
-      AND campaign_session_id != ''
-    GROUP BY campaign_session_id
+    WHERE campaign_id IS NOT NULL
+      AND campaign_id != ''
+      AND action = 'PLAY_START'
+      AND content_title !~ '\.(mp4|jpg|jpeg|png)$'
+    ORDER BY campaign_id, content_title
   `
 
-  console.log(`  그룹핑된 세션: ${groupedSessions.length}개`)
+  console.log(`  player_history에서 발견: ${campaignsFromPlayerHistory.length}개`)
 
-  // 배치로 삽입
+  // Step 1-2: 나머지는 시간 매칭으로 content_performance에서 가져오기
+  const foundCampaignIds = new Set(campaignsFromPlayerHistory.map(c => c.campaign_id))
+
+  const allCampaignIds = await prisma.$queryRaw<Array<{ campaign_id: string }>>`
+    SELECT DISTINCT campaign_id
+    FROM player_history
+    WHERE campaign_id IS NOT NULL
+      AND campaign_id != ''
+      AND action = 'PLAY_START'
+  `
+
+  const missingCampaignIds = allCampaignIds
+    .map(c => c.campaign_id)
+    .filter(id => !foundCampaignIds.has(id))
+
+  console.log(`  누락된 campaign: ${missingCampaignIds.length}개 (시간 매칭 필요)`)
+
+  const campaignsFromTimeMatch = await prisma.$queryRaw<Array<{
+    campaign_id: string
+    content_id: string
+    content_title: string
+  }>>`
+    SELECT DISTINCT ON (ph.campaign_id)
+      ph.campaign_id,
+      ph.content_id,
+      cp.title as content_title
+    FROM player_history ph
+    INNER JOIN content_performance cp
+      ON ph.iso_time = cp.play_at
+      AND ph.action = 'PLAY_START'
+    WHERE ph.campaign_id = ANY(${missingCampaignIds}::text[])
+      AND cp.title !~ '\.(mp4|jpg|jpeg|png)$'
+    ORDER BY ph.campaign_id, cp.title
+  `
+
+  console.log(`  시간 매칭에서 발견: ${campaignsFromTimeMatch.length}개`)
+
+  // Step 1-3: 여전히 누락된 것은 확장자 그대로 넣기 (프론트에서 처리)
+  const stillMissingIds = missingCampaignIds.filter(
+    id => !campaignsFromTimeMatch.some(c => c.campaign_id === id)
+  )
+
+  console.log(`  여전히 누락: ${stillMissingIds.length}개 (확장자 포함 그대로)`)
+
+  const campaignsWithExtension = await prisma.$queryRaw<Array<{
+    campaign_id: string
+    content_id: string
+    content_title: string
+  }>>`
+    SELECT DISTINCT ON (campaign_id)
+      campaign_id,
+      content_id,
+      content_title
+    FROM player_history
+    WHERE campaign_id = ANY(${stillMissingIds}::text[])
+      AND action = 'PLAY_START'
+    ORDER BY campaign_id, content_title
+  `
+
+  console.log(`  확장자 포함으로 발견: ${campaignsWithExtension.length}개`)
+
+  // 합치기
+  const allCampaigns = [
+    ...campaignsFromPlayerHistory,
+    ...campaignsFromTimeMatch,
+    ...campaignsWithExtension
+  ]
+
+  await prisma.campaign.createMany({
+    data: allCampaigns.map(c => ({
+      campaignId: c.campaign_id,
+      contentId: c.content_id,
+      contentTitle: c.content_title,
+    })),
+    skipDuplicates: true
+  })
+
+  console.log(`[OK] Campaign: ${allCampaigns.length} rows\n`)
+  return allCampaigns.length
+}
+
+// ============================================
+// Step 2: Customer 테이블 생성
+// ============================================
+
+async function buildCustomers() {
+  console.log('[2/4] Building Customer 테이블...')
+
+  // content_performance에서 audience_id별로 집계
+  // gender/age는 NULL이 아닌 값 우선 선택 (최빈값)
+  const customers = await prisma.$queryRaw<Array<{
+    audience_id: string
+    gender: string
+    age: string
+    total_watch_time: number
+  }>>`
+    SELECT
+      audience_id,
+      COALESCE(
+        MODE() WITHIN GROUP (ORDER BY gender) FILTER (WHERE gender IS NOT NULL AND gender != ''),
+        'unknown'
+      ) as gender,
+      COALESCE(
+        MODE() WITHIN GROUP (ORDER BY age) FILTER (WHERE age IS NOT NULL AND age != ''),
+        'unknown'
+      ) as age,
+      SUM(attention_sec) as total_watch_time
+    FROM content_performance
+    WHERE audience_id IS NOT NULL
+      AND audience_id != ''
+    GROUP BY audience_id
+  `
+
+  console.log(`  발견된 고객: ${customers.length}명`)
+
+  // 배치 삽입
+  const BATCH_SIZE = 5000
   let inserted = 0
-  for (let i = 0; i < groupedSessions.length; i += BATCH_SIZE) {
-    const batch = groupedSessions.slice(i, i + BATCH_SIZE)
 
-    await prisma.rawPlayerHistory.createMany({
-      data: batch.map(s => ({
-        campaignSessionId: s.campaign_session_id,
-        campaignId: s.campaign_id,
-        startAt: s.start_at,
-        endAt: s.end_at,
-        durationSecond: s.duration_second,
-        elapsedSecond: s.elapsed_second,
-        contentId: s.content_id,
-        contentSessionId: s.content_session_id,
-        contentTitle: s.content_title,
-        deviceId: s.device_id,
-        inventoryId: s.inventory_id,
-        playerVersion: s.player_version,
-        pricingRule: s.pricing_rule,
-        contentDuration: s.content_duration,
-        contentSelection: s.content_selection,
-        contentVersion: s.content_version,
-        playlistCreatedTime: s.playlist_created_time,
-        sequenceId: s.sequence_id,
-        advertiserId: s.advertiser_id,
-        contentPerformanceIds: [] // 나중에 매핑
+  for (let i = 0; i < customers.length; i += BATCH_SIZE) {
+    const batch = customers.slice(i, i + BATCH_SIZE)
+
+    await prisma.customer.createMany({
+      data: batch.map(c => ({
+        customerId: c.audience_id,
+        gender: c.gender || 'unknown',
+        age: c.age || 'unknown',
+        totalWatchTime: Number(c.total_watch_time) || 0,
       })),
       skipDuplicates: true
     })
 
     inserted += batch.length
-    console.log(`  삽입: ${inserted}/${groupedSessions.length}`)
+    console.log(`  진행: ${inserted}/${customers.length}`)
   }
 
-  console.log(`[OK] raw_player_history: ${inserted} rows`)
-  return { total: inserted }
+  console.log(`[OK] Customer: ${inserted} rows\n`)
+  return inserted
 }
 
 // ============================================
-// Step 4: ContentPerformance → RawContentPerformance (정제)
+// Step 3: Event 테이블 생성 (시간 기반 정확 매칭)
 // ============================================
 
-async function buildRawContentPerformance() {
-  console.log('\n[4/4] Building raw_content_performance (정제)...')
+async function buildEvents() {
+  console.log('[3/4] Building Event 테이블 (시간 기반 매칭)...')
 
-  const csvPath = path.join(process.cwd(), '.csv', 'content_performance.csv')
-  const records: any[] = []
-  let totalRows = 0
-  let skippedRows = 0
-  const invalidRows: Array<{ line: number; reason: string; data: string }> = []
+  // 시간 기준으로 content_performance와 player_history 조인하여 Event 생성
+  const events = await prisma.$queryRaw<Array<{
+    campaign_id: string
+    customer_id: string
+    play_at: Date
+    is_attention: boolean
+    is_entrance: boolean
+    attention_sec: number
+  }>>`
+    SELECT
+      ph.campaign_id,
+      cp.audience_id as customer_id,
+      cp.play_at,
+      cp.is_attention,
+      cp.is_entrance,
+      cp.attention_sec
+    FROM content_performance cp
+    INNER JOIN player_history ph
+      ON cp.play_at = ph.iso_time
+      AND ph.action = 'PLAY_START'
+    WHERE ph.campaign_id IS NOT NULL
+      AND ph.campaign_id != ''
+      AND cp.audience_id IS NOT NULL
+      AND cp.audience_id != ''
+  `
 
-  const parser = createReadStream(csvPath).pipe(
-    parse({
-      columns: true,
-      skip_empty_lines: true,
-      trim: true,
-      bom: true,
-      relax_column_count: true,
-      relax_quotes: true,
+  console.log(`  시간 매칭 완료: ${events.length}개 이벤트`)
+
+  // 배치 삽입
+  const BATCH_SIZE = 5000
+  let inserted = 0
+
+  for (let i = 0; i < events.length; i += BATCH_SIZE) {
+    const batch = events.slice(i, i + BATCH_SIZE)
+
+    await prisma.event.createMany({
+      data: batch.map(e => ({
+        campaignId: e.campaign_id,
+        customerId: e.customer_id,
+        playAt: e.play_at,
+        isAttention: e.is_attention,
+        isEntrance: e.is_entrance,
+        attentionSec: e.attention_sec,
+      })),
+      skipDuplicates: true
     })
-  )
 
-  let lineNumber = 1 // 헤더 제외
-  for await (const row of parser) {
-    lineNumber++
-    const record = row as ContentPerformanceRow
+    inserted += batch.length
+    console.log(`  진행: ${inserted}/${events.length}`)
+  }
 
-    // play_at 날짜 검증만 수행
-    const playAtDate = new Date(record.play_at)
-    if (isNaN(playAtDate.getTime())) {
-      skippedRows++
-      invalidRows.push({
-        line: lineNumber,
-        reason: '잘못된 play_at 날짜 형식',
-        data: record.play_at
+  console.log(`[OK] Event: ${inserted} rows\n`)
+  return { inserted, skipped: 0 }
+}
+
+// ============================================
+// Step 4: PerformanceSummary 생성
+// ============================================
+
+async function buildPerformanceSummary() {
+  console.log('[4/4] Building PerformanceSummary...')
+
+  const aggregatedData = await prisma.$queryRaw<Array<{
+    campaign_id: string
+    content_title: string
+    impressions: bigint
+    attention_count: bigint
+    entrance_count: bigint
+  }>>`
+    SELECT
+      e.campaign_id,
+      c.content_title,
+      COUNT(*) as impressions,
+      SUM(CASE WHEN e.is_attention = true THEN 1 ELSE 0 END) as attention_count,
+      SUM(CASE WHEN e.is_entrance = true THEN 1 ELSE 0 END) as entrance_count
+    FROM event e
+    INNER JOIN campaign c ON e.campaign_id = c.campaign_id
+    GROUP BY e.campaign_id, c.content_title
+    ORDER BY e.campaign_id
+  `
+
+  const dataWithRates = aggregatedData.map(row => {
+    const impressions = Number(row.impressions)
+    const attentionCount = Number(row.attention_count)
+    const entranceCount = Number(row.entrance_count)
+
+    return {
+      campaignId: row.campaign_id,
+      contentTitle: row.content_title,
+      impressions,
+      attentionRate: impressions > 0 ? attentionCount / impressions : 0,
+      entranceRate: impressions > 0 ? entranceCount / impressions : 0,
+    }
+  })
+
+  // 등급 계산 (entrance_rate 기준)
+  const sorted = [...dataWithRates].sort((a, b) => b.entranceRate - a.entranceRate)
+  const total = sorted.length
+
+  const dataWithGrades = sorted.map((item, index) => {
+    const percentile = (index / total) * 100
+    let grade = 'C'
+    if (percentile < 10) grade = 'S'
+    else if (percentile < 30) grade = 'A'
+    else if (percentile < 60) grade = 'B'
+
+    return {
+      campaignId: item.campaignId,
+      contentTitle: item.contentTitle,
+      impressions: item.impressions,
+      attentionRate: item.attentionRate,
+      entranceRate: item.entranceRate,
+      grade,
+    }
+  })
+
+  await prisma.performanceSummary.createMany({
+    data: dataWithGrades,
+    skipDuplicates: true
+  })
+
+  console.log(`[OK] PerformanceSummary: ${dataWithGrades.length} rows\n`)
+  return dataWithGrades.length
+}
+
+// ============================================
+// Step 5: CampaignDetail 생성
+// ============================================
+
+async function buildCampaignDetails() {
+  console.log('[5/5] Building CampaignDetail...')
+
+  const details = await prisma.$queryRaw<Array<{
+    campaign_id: string
+    total_viewers: bigint
+    attention_count: bigint
+    entrance_count: bigint
+    total_watch_time: number
+  }>>`
+    SELECT
+      e.campaign_id,
+      COUNT(DISTINCT e.customer_id) as total_viewers,
+      SUM(CASE WHEN e.is_attention = true THEN 1 ELSE 0 END) as attention_count,
+      SUM(CASE WHEN e.is_entrance = true THEN 1 ELSE 0 END) as entrance_count,
+      SUM(e.attention_sec) as total_watch_time
+    FROM event e
+    GROUP BY e.campaign_id
+  `
+
+  // 캠페인별 연령 분포
+  const ageDistributions = await prisma.$queryRaw<Array<{
+    campaign_id: string
+    age: string
+    count: bigint
+  }>>`
+    SELECT
+      e.campaign_id,
+      c.age,
+      COUNT(DISTINCT e.customer_id) as count
+    FROM event e
+    INNER JOIN customer c ON e.customer_id = c.customer_id
+    GROUP BY e.campaign_id, c.age
+    ORDER BY e.campaign_id, c.age
+  `
+
+  // 캠페인별 성별 분포
+  const genderDistributions = await prisma.$queryRaw<Array<{
+    campaign_id: string
+    gender: string
+    count: bigint
+  }>>`
+    SELECT
+      e.campaign_id,
+      c.gender,
+      COUNT(DISTINCT e.customer_id) as count
+    FROM event e
+    INNER JOIN customer c ON e.customer_id = c.customer_id
+    GROUP BY e.campaign_id, c.gender
+    ORDER BY e.campaign_id, c.gender
+  `
+
+  // 캠페인별로 그룹화
+  const campaignMap = new Map<string, {
+    totalViewers: number
+    attentionCount: number
+    entranceCount: number
+    totalWatchTime: number
+    ageDistribution: Array<{ age: string; count: number }>
+    genderDistribution: Array<{ gender: string; count: number }>
+  }>()
+
+  details.forEach(detail => {
+    campaignMap.set(detail.campaign_id, {
+      totalViewers: Number(detail.total_viewers),
+      attentionCount: Number(detail.attention_count),
+      entranceCount: Number(detail.entrance_count),
+      totalWatchTime: Number(detail.total_watch_time),
+      ageDistribution: [],
+      genderDistribution: []
+    })
+  })
+
+  ageDistributions.forEach(row => {
+    const campaign = campaignMap.get(row.campaign_id)
+    if (campaign) {
+      campaign.ageDistribution.push({
+        age: row.age,
+        count: Number(row.count)
       })
-      continue
     }
+  })
 
-    records.push(record)
-
-    if (records.length >= BATCH_SIZE) {
-      await insertRawContentPerformanceBatch(records)
-      totalRows += records.length
-      console.log(`  삽입: ${totalRows} rows...`)
-      records.length = 0
+  genderDistributions.forEach(row => {
+    const campaign = campaignMap.get(row.campaign_id)
+    if (campaign) {
+      campaign.genderDistribution.push({
+        gender: row.gender,
+        count: Number(row.count)
+      })
     }
-  }
+  })
 
-  if (records.length > 0) {
-    await insertRawContentPerformanceBatch(records)
-    totalRows += records.length
-  }
-
-  // 이상 데이터 로그 출력
-  if (invalidRows.length > 0) {
-    console.log(`\n[경고] ${invalidRows.length}개의 이상 데이터 발견:`)
-    invalidRows.slice(0, 10).forEach(row => {
-      console.log(`  라인 ${row.line}: ${row.reason} - ${row.data}`)
-    })
-    if (invalidRows.length > 10) {
-      console.log(`  ... 외 ${invalidRows.length - 10}개`)
-    }
-  }
-
-  console.log(`[OK] raw_content_performance: ${totalRows} rows (스킵: ${skippedRows})`)
-  return { total: totalRows, skipped: skippedRows }
-}
-
-async function insertRawContentPerformanceBatch(records: ContentPerformanceRow[]) {
-  // 날짜 검증 후 유효한 레코드만 필터링
-  const validRecords = records.filter(row => isValidDate(row.play_at))
-
-  if (validRecords.length < records.length) {
-    console.log(`  [경고] ${records.length - validRecords.length}개 레코드 스킵 (잘못된 날짜)`)
-  }
-
-  if (validRecords.length === 0) return
-
-  const data = validRecords.map((row) => ({
-    contentId: row.content_id || '',
-    title: row.title || '',
-    audienceId: row.audience_id || '',
-    age: row.age || '',
-    gender: row.gender || '',
-    playAt: new Date(row.play_at),
-    attentionSec: parseFloat(row.attention_sec) || 0,
-    isAttention: row.is_attention === 'true',
-    isEntrance: row.is_entrance === 'true',
-    contentGroup: row.content_group || '',
+  // DB에 저장
+  const data = Array.from(campaignMap.entries()).map(([campaignId, stats]) => ({
+    campaignId,
+    totalViewers: stats.totalViewers,
+    attentionCount: stats.attentionCount,
+    entranceCount: stats.entranceCount,
+    totalWatchTime: stats.totalWatchTime,
+    ageDistribution: stats.ageDistribution,
+    genderDistribution: stats.genderDistribution
   }))
 
-  await prisma.rawContentPerformance.createMany({
+  await prisma.campaignDetail.createMany({
     data,
-    skipDuplicates: true,
-  })
-}
-
-// ============================================
-// Step 5: contentPerformanceIds 매칭 (정확한 시간 일치)
-// ============================================
-
-async function mapContentPerformanceIds() {
-  console.log('\n[5/5] Mapping contentPerformanceIds (1:N, 정확한 시간 일치)...')
-
-  // raw_player_history에서 start_at이 있는 레코드
-  const sessions = await prisma.rawPlayerHistory.findMany({
-    where: {
-      startAt: { not: null }
-    },
-    select: { id: true, startAt: true, contentId: true },
-    orderBy: { id: 'asc' }
+    skipDuplicates: true
   })
 
-  console.log(`  매칭 대상 세션: ${sessions.length}개`)
-
-  let totalMatched = 0
-  let totalAudiences = 0
-  const BATCH_UPDATE_SIZE = 500
-
-  for (let i = 0; i < sessions.length; i += BATCH_UPDATE_SIZE) {
-    const batch = sessions.slice(i, i + BATCH_UPDATE_SIZE)
-
-    for (const session of batch) {
-      if (!session.startAt) continue
-
-      // 조건: content_id 일치 + play_at이 start_at과 정확히 일치
-      const matchingContents = await prisma.rawContentPerformance.findMany({
-        where: {
-          contentId: session.contentId,
-          playAt: session.startAt
-        },
-        select: { id: true }
-      })
-
-      if (matchingContents.length > 0) {
-        const contentPerfIds = matchingContents.map(c => c.id)
-
-        await prisma.rawPlayerHistory.update({
-          where: { id: session.id },
-          data: { contentPerformanceIds: contentPerfIds }
-        })
-
-        totalMatched++
-        totalAudiences += matchingContents.length
-      }
-    }
-
-    const progress = Math.min(i + BATCH_UPDATE_SIZE, sessions.length)
-    const pct = ((progress / sessions.length) * 100).toFixed(1)
-    console.log(`  진행: ${progress}/${sessions.length} (${pct}%)`)
-  }
-
-  const matchRate = sessions.length > 0 ? ((totalMatched / sessions.length) * 100).toFixed(1) : '0.0'
-  const avgAudiences = totalMatched > 0 ? (totalAudiences / totalMatched).toFixed(2) : '0.00'
-
-  console.log(`[OK] contentPerformanceIds 매칭 완료`)
-  console.log(`  - 매칭된 세션: ${totalMatched}/${sessions.length} (${matchRate}%)`)
-  console.log(`  - 총 관객 수: ${totalAudiences}명`)
-  console.log(`  - 세션당 평균 관객: ${avgAudiences}명`)
-
-  return { total: sessions.length, matched: totalMatched, totalAudiences }
-}
-
-// ============================================
-// Step 6: 잘못된 Content 데이터 수정
-// ============================================
-
-async function fixContentData() {
-  console.log('\n[6/6] Fixing corrupted content data (확장자 제거)...')
-
-  // PlayerHistory의 content_id를 title, content_group에 직접 대입
-  const updated = await prisma.$executeRaw`
-    UPDATE raw_content_performance rcp
-    SET
-      title = ph.content_id,
-      content_group = ph.content_id
-    FROM (
-      SELECT DISTINCT
-        unnest(rph.content_performance_ids) as cp_id,
-        rph.content_id
-      FROM raw_player_history rph
-      WHERE array_length(rph.content_performance_ids, 1) > 0
-    ) AS ph
-    WHERE rcp.id = ph.cp_id
-      AND (rcp.title LIKE '%.mp4' OR rcp.title LIKE '%.jpg')
-  `
-
-  console.log(`[OK] Content 데이터 수정: ${updated}개`)
-
-  // 검증
-  const remaining = await prisma.rawContentPerformance.count({
-    where: {
-      OR: [
-        { title: { endsWith: '.mp4' } },
-        { title: { endsWith: '.jpg' } }
-      ]
-    }
-  })
-
-  console.log(`  - 남은 잘못된 데이터: ${remaining}개`)
-
-  return { total: Number(updated), fixed: Number(updated), remaining }
-}
-
-// ============================================
-// Step 7: 잘못된 PlayerHistory content_title 수정
-// ============================================
-
-async function fixPlayerHistoryContentTitle() {
-  console.log('\n[7/7] Fixing PlayerHistory content_title (확장자 제거)...')
-
-  // ContentPerformance의 title을 content_title에 대입
-  const updated = await prisma.$executeRaw`
-    UPDATE raw_player_history rph
-    SET content_title = correct.title
-    FROM (
-      SELECT DISTINCT ON (rph.id)
-        rph.id,
-        rcp.title
-      FROM raw_player_history rph
-      CROSS JOIN LATERAL unnest(rph.content_performance_ids) AS cp_id
-      INNER JOIN raw_content_performance rcp ON rcp.id = cp_id
-      WHERE rph.content_title ~ '\.(mp4|jpg|jpeg|png)$'
-      ORDER BY rph.id, rcp.id
-    ) AS correct
-    WHERE rph.id = correct.id
-  `
-
-  console.log(`[OK] PlayerHistory content_title 수정: ${updated}개`)
-
-  // 검증
-  const remaining = await prisma.rawPlayerHistory.count({
-    where: {
-      OR: [
-        { contentTitle: { endsWith: '.mp4' } },
-        { contentTitle: { endsWith: '.jpg' } },
-        { contentTitle: { endsWith: '.jpeg' } },
-        { contentTitle: { endsWith: '.png' } }
-      ]
-    }
-  })
-
-  console.log(`  - 남은 잘못된 데이터: ${remaining}개`)
-
-  return { total: Number(updated), fixed: Number(updated), remaining }
+  console.log(`[OK] CampaignDetail: ${data.length} rows\n`)
+  return data.length
 }
 
 // ============================================
@@ -573,50 +425,38 @@ async function fixPlayerHistoryContentTitle() {
 // ============================================
 
 async function main() {
-  console.log('데이터 임포트 및 정제 시작...\n')
+  console.log('스타 스키마 데이터 처리 시작...\n')
   const startTime = Date.now()
 
   try {
-    // 기존 데이터 삭제
-    console.log('기존 데이터 삭제 중...')
-    await prisma.rawContentPerformance.deleteMany()
-    await prisma.rawPlayerHistory.deleteMany()
-    await prisma.contentPerformance.deleteMany()
-    await prisma.playerHistory.deleteMany()
+    // Step 1: Campaign 테이블
+    const campaignCount = await buildCampaigns()
 
-    // Step 1-2: 원본 데이터 저장
-    const phResult = await seedPlayerHistory()
-    const cpResult = await seedContentPerformance()
+    // Step 2: Customer 테이블
+    const customerCount = await buildCustomers()
 
-    // Step 3-4: 정제 데이터 생성
-    const rawPhResult = await buildRawPlayerHistory()
-    const rawCpResult = await buildRawContentPerformance()
+    // Step 3: Event 테이블
+    const eventResult = await buildEvents()
 
-    // Step 5: contentPerformanceIds 1:N 매칭
-    const mappingResult = await mapContentPerformanceIds()
+    // Step 4: PerformanceSummary
+    const summaryCount = await buildPerformanceSummary()
 
-    // Step 6: 잘못된 Content 데이터 수정
-    const fixResult = await fixContentData()
-
-    // Step 7: 잘못된 PlayerHistory content_title 수정
-    const fixPhResult = await fixPlayerHistoryContentTitle()
+    // Step 5: CampaignDetail
+    const detailCount = await buildCampaignDetails()
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(2)
-    console.log(`\n${'='.repeat(80)}`)
-    console.log(`모든 작업 완료: ${elapsed}초`)
+    console.log(`${'='.repeat(80)}`)
+    console.log(`처리 완료: ${elapsed}초`)
     console.log('='.repeat(80))
     console.log('\n요약:')
-    console.log(`   [1] player_history (원본): ${phResult.total} rows`)
-    console.log(`   [2] content_performance (원본): ${cpResult.total} rows`)
-    console.log(`   [3] raw_player_history (정제): ${rawPhResult.total} rows`)
-    console.log(`   [4] raw_content_performance (정제): ${rawCpResult.total} rows (스킵: ${rawCpResult.skipped})`)
-    console.log(`   [5] contentPerformanceIds 매칭: ${mappingResult.matched}/${mappingResult.total} (${mappingResult.total > 0 ? ((mappingResult.matched / mappingResult.total) * 100).toFixed(1) : '0.0'}%)`)
-    console.log(`       총 관객: ${mappingResult.totalAudiences}명, 평균: ${(mappingResult.totalAudiences / mappingResult.matched).toFixed(2)}명/세션`)
-    console.log(`   [6] ContentPerformance 데이터 수정: ${fixResult.fixed}개 (남은 오류: ${fixResult.remaining})`)
-    console.log(`   [7] PlayerHistory content_title 수정: ${fixPhResult.fixed}개 (남은 오류: ${fixPhResult.remaining})`)
-    console.log('\n✓ 데이터베이스 준비 완료!')
+    console.log(`  [1] Campaign: ${campaignCount} rows`)
+    console.log(`  [2] Customer: ${customerCount} rows`)
+    console.log(`  [3] Event: ${eventResult.inserted} rows (스킵: ${eventResult.skipped})`)
+    console.log(`  [4] PerformanceSummary: ${summaryCount} rows`)
+    console.log(`  [5] CampaignDetail: ${detailCount} rows`)
+    console.log('\n✓ 완료!')
   } catch (error) {
-    console.error('\n[오류] Seed 실패:', error)
+    console.error('\n[오류] 처리 실패:', error)
     throw error
   } finally {
     await prisma.$disconnect()

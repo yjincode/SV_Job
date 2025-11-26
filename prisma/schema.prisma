@@ -59,100 +59,60 @@ model ContentPerformance {
 }
 
 // ============================================
-// 정제된 데이터 테이블 (PK 있음)
+// 스타 스키마: Dimension Tables
 // ============================================
 
-// 정제된 player_history (campaign_session_id로 그룹핑)
-model RawPlayerHistory {
-  id                     Int       @id @default(autoincrement())
-  campaignSessionId      String    @unique @map("campaign_session_id")
-  campaignId             String    @map("campaign_id")
-  startAt                DateTime? @map("start_at")
-  endAt                  DateTime? @map("end_at")
-  durationSecond         Float?    @map("duration_second")
-  elapsedSecond          Float?    @map("elapsed_second")
-  contentId              String    @map("content_id")
-  contentSessionId       String    @map("content_session_id")
-  contentTitle           String    @map("content_title")
-  deviceId               String    @map("device_id")
-  inventoryId            String    @map("inventory_id")
-  playerVersion          String    @map("player_version")
-  pricingRule            String    @map("pricing_rule")
-  contentDuration        Float     @map("content_duration")
-  contentSelection       String    @map("content_selection")
-  contentVersion         Int       @map("content_version")
-  playlistCreatedTime    DateTime  @map("playlist_created_time")
-  sequenceId             String    @map("sequence_id")
-  advertiserId           String?   @map("advertiser_id")
-  contentPerformanceIds  Int[]     @default([]) @map("content_performance_ids")
-  createdAt              DateTime  @default(now()) @map("created_at")
-
-  @@index([campaignSessionId])
-  @@index([startAt])
-  @@index([contentId])
-  @@map("raw_player_history")
-}
-
-// 정제된 content_performance
-model RawContentPerformance {
+// Campaign 테이블 (Dimension) - 광고(캠페인) 마스터
+model Campaign {
   id           Int      @id @default(autoincrement())
+  campaignId   String   @unique @map("campaign_id")
   contentId    String   @map("content_id")
-  title        String
-  audienceId   String   @map("audience_id")
-  age          String
-  gender       String
-  playAt       DateTime @map("play_at")
-  attentionSec Float    @map("attention_sec")
-  isAttention  Boolean  @map("is_attention")
-  isEntrance   Boolean  @map("is_entrance")
-  contentGroup String   @map("content_group")
+  contentTitle String   @map("content_title")
   createdAt    DateTime @default(now()) @map("created_at")
 
+  events       Event[]
+
+  @@index([campaignId])
+  @@map("campaign")
+}
+
+// Customer 테이블 (Dimension) - 고객 마스터
+model Customer {
+  id             Int      @id @default(autoincrement())
+  customerId     String   @unique @map("customer_id") // audience_id
+  gender         String
+  age            String
+  totalWatchTime Float    @default(0) @map("total_watch_time") // 총 attention_sec 합산
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  events         Event[]
+
+  @@index([customerId])
+  @@map("customer")
+}
+
+// ============================================
+// 스타 스키마: Fact Table
+// ============================================
+
+// Event 테이블 (Fact) - Campaign과 Customer를 연결하는 팩트 테이블
+model Event {
+  id           Int      @id @default(autoincrement())
+  campaignId   String   @map("campaign_id")
+  customerId   String   @map("customer_id") // audience_id
+  playAt       DateTime @map("play_at")
+  isAttention  Boolean  @map("is_attention")
+  isEntrance   Boolean  @map("is_entrance")
+  attentionSec Float    @map("attention_sec")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  campaign     Campaign @relation(fields: [campaignId], references: [campaignId])
+  customer     Customer @relation(fields: [customerId], references: [customerId])
+
+  @@index([campaignId])
+  @@index([customerId])
   @@index([playAt])
-  @@index([contentId])
-  @@index([audienceId])
-  @@map("raw_content_performance")
-}
-
-// ============================================
-// 정리된 데이터 테이블
-// ============================================
-
-// Content 마스터 (content_id별로 1개의 레코드)
-model Content {
-  id           Int               @id @default(autoincrement())
-  contentId    String            @unique @map("content_id")
-  title        String
-  contentGroup String            @map("content_group")
-  createdAt    DateTime          @default(now()) @map("created_at")
-
-  campaignSessions CampaignSession[]
-
-  @@map("content")
-}
-
-// Campaign Session (campaign_session_id별로 1개의 레코드)
-model CampaignSession {
-  id                 Int       @id @default(autoincrement())
-  campaignSessionId  String    @unique @map("campaign_session_id")
-  startTime          DateTime? @map("start_time")
-  endTime            DateTime? @map("end_time")
-  duration           Float?    @map("duration")
-  audienceId         String?   @map("audience_id")
-  contentId          String?   @map("content_id")
-  contentSessionId   String?   @map("content_session_id")
-  contentTitle       String?   @map("content_title")
-  deviceId           String?   @map("device_id")
-  contentFk          Int?      @map("content_fk")
-
-  content            Content?  @relation(fields: [contentFk], references: [id])
-
-  createdAt          DateTime  @default(now()) @map("created_at")
-
-  @@index([contentFk])
-  @@index([startTime])
-  @@index([audienceId])
-  @@map("campaign_session")
+  @@map("event")
 }
 
 // ============================================
@@ -162,16 +122,31 @@ model CampaignSession {
 // Pre-aggregated KPI summary for O(1) queries
 model PerformanceSummary {
   id            Int      @id @default(autoincrement())
-  contentId     String   @unique @map("content_id")
-  title         String
-  contentGroup  String   @map("content_group")
+  campaignId    String   @unique @map("campaign_id")
+  contentTitle  String   @map("content_title")
   impressions   Int
   attentionRate Float    @map("attention_rate")
   entranceRate  Float    @map("entrance_rate")
   grade         String
   createdAt     DateTime @default(now()) @map("created_at")
 
-  @@index([contentGroup])
+  @@index([campaignId])
   @@index([entranceRate])
   @@map("performance_summary")
+}
+
+// Campaign detail statistics (age/gender distribution, watch time, etc.)
+model CampaignDetail {
+  id                Int      @id @default(autoincrement())
+  campaignId        String   @unique @map("campaign_id")
+  totalViewers      Int      @map("total_viewers")
+  attentionCount    Int      @map("attention_count")
+  entranceCount     Int      @map("entrance_count")
+  totalWatchTime    Float    @map("total_watch_time")
+  ageDistribution   Json     @map("age_distribution")      // [{ age: "18-29", count: 450 }, ...]
+  genderDistribution Json    @map("gender_distribution")   // [{ gender: "male", count: 650 }, ...]
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  @@index([campaignId])
+  @@map("campaign_detail")
 }

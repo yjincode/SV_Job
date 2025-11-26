@@ -1,17 +1,21 @@
+export interface CampaignDetail {
+  totalViewers: number
+  attentionCount: number
+  entranceCount: number
+  totalWatchTime: number
+  ageDistribution: Array<{ age: string; count: number }>
+  genderDistribution: Array<{ gender: string; count: number }>
+}
+
 export interface PerformanceData {
+  campaignId: string
   contentId: string
   title: string
-  contentGroup: string
   impressions: number
   attentionRate: number
   entranceRate: number
   grade: string
-}
-
-export interface GroupData {
-  contentGroup: string
-  avgEntranceRate: number
-  contentCount: number
+  detail: CampaignDetail | null
 }
 
 export interface Summary {
@@ -23,6 +27,5 @@ export interface Summary {
 
 export interface ApiResponse {
   data: PerformanceData[]
-  groupData: GroupData[]
   summary: Summary
 }

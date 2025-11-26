@@ -7,7 +7,7 @@ echo "========================================"
 
 # Wait for database to be ready
 echo ""
-echo "[1/4] Waiting for database connection..."
+echo "[1/5] Waiting for database connection..."
 MAX_RETRIES=30
 RETRY_COUNT=0
 
@@ -24,28 +24,37 @@ echo "[OK] Database connected"
 
 # Apply schema
 echo ""
-echo "[2/4] Applying database schema..."
+echo "[2/5] Applying database schema..."
 npx prisma db push --skip-generate
 echo "[OK] Schema applied"
 
-# Seed database
+# Import CSV data
 echo ""
-echo "[3/4] Seeding database..."
+echo "[3/5] Importing CSV data..."
 if [ -f "./.csv/content_performance.csv" ] && [ -f "./.csv/player_history.csv" ]; then
-  npx tsx scripts/seed.ts
-  echo "[OK] Seeding completed"
-  # 시드 완료 표시 파일 생성
-  touch /tmp/seed-complete
+  npx tsx scripts/import-csv.ts
+  echo "[OK] CSV import completed"
 else
-  echo "[WARN] CSV files not found. Skipping seed."
+  echo "[WARN] CSV files not found. Skipping import."
   echo "  Expected: .csv/content_performance.csv"
   echo "  Expected: .csv/player_history.csv"
   touch /tmp/seed-complete
+  exec npm start
+  exit 0
 fi
+
+# Build star schema
+echo ""
+echo "[4/5] Building star schema and aggregating KPIs..."
+npx tsx scripts/seed.ts
+echo "[OK] Star schema completed"
+
+# 시드 완료 표시 파일 생성
+touch /tmp/seed-complete
 
 # Start application
 echo ""
-echo "[4/4] Starting Next.js server..."
+echo "[5/5] Starting Next.js server..."
 echo "========================================"
 echo ""
 exec npm start
